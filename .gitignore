@@ -1,0 +1,9 @@
+/target
+/build
+
+# get limine-binary from https://github.com/Limine-Bootloader/Limine/releases/
+/limine
+
+# This is just a fork of crates.io ps2 but with a newer version of x86_64 set
+# to please the nightly Rust compiler
+/vendor
