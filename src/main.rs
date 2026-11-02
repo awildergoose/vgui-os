@@ -1,3 +1,4 @@
+#![feature(str_split_remainder)]
 #![feature(abi_x86_interrupt)]
 #![feature(core_float_math)]
 #![allow(clippy::cast_possible_truncation)]
@@ -9,6 +10,7 @@
 #![no_std]
 #![no_main]
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use core::hint::spin_loop;
@@ -20,11 +22,13 @@ use pc_keyboard::{KeyCode, KeyState};
 use crate::bump_frame_allocator::BumpFrameAllocator;
 use crate::cmos::CMOS;
 use crate::framebuffer::swap_buffers;
+use crate::irc::Irc;
 use crate::logger::SERIAL_LOGGER;
 use crate::misc::{
-    BASE_REVISION, FRAMEBUFFER_REQUEST, HHDM_REQUEST, MEMORY_MAP_REQUEST, halt, init_allocator,
+    BASE_REVISION, FRAMEBUFFER_REQUEST, HHDM_REQUEST, MEMORY_MAP_REQUEST, get_instant_now, halt,
+    init_allocator,
 };
-use crate::net::init_network;
+use crate::net::{NETWORK_STACK, init_network};
 use crate::{
     color::Color,
     framebuffer::{clear_framebuffer, init_fb},
@@ -42,12 +46,12 @@ pub mod color;
 pub mod font;
 pub mod framebuffer;
 pub mod idt;
+pub mod irc;
 pub mod keyboard;
 pub mod logger;
 pub mod misc;
 pub mod mouse;
 pub mod net;
-pub mod net_pci;
 pub mod ps2;
 pub mod serial;
 pub mod text;
@@ -103,7 +107,10 @@ pub extern "C" fn _start() -> ! {
     serial_println!("FRAME ALLOCATOR BASE: {}", frame_entry.base);
     serial_println!("FRAME ALLOCATOR SIZE: {}", frame_entry.length);
 
-    let mut frame_allocator = BumpFrameAllocator::new(frame_entry.base, frame_entry.length);
+    let frame_allocator = Box::leak(Box::new(BumpFrameAllocator::new(
+        frame_entry.base,
+        frame_entry.length,
+    )));
 
     serial_println!("FRAME ALLOCATOR OK");
 
@@ -139,7 +146,7 @@ pub extern "C" fn _start() -> ! {
 
     info!("CMOS: {:?}", CMOS.with_mut(cmos::CMOS::get_time));
 
-    init_network(hhdm_offset, &mut frame_allocator);
+    init_network(hhdm_offset, frame_allocator);
     info!("NET OK");
 
     let mut mouse_x = 0u16;
@@ -147,7 +154,22 @@ pub extern "C" fn _start() -> ! {
     let mut mouse_l = false;
     let mut text = String::new();
 
+    let mut irc = Irc::new();
+
     loop {
+        // update
+        {
+            let mut ns = NETWORK_STACK.lock();
+            let stack = ns.as_mut().unwrap();
+            stack.poll(get_instant_now());
+        }
+
+        {
+            irc.update();
+        }
+
+        // render
+
         clear_framebuffer(if mouse_l { Color::BLACK } else { Color::GRAY });
 
         if let Some(key) = KEYBOARD.lock().poll() {
@@ -156,6 +178,9 @@ pub extern "C" fn _start() -> ! {
             if key.state == KeyState::Down {
                 if key.code == KeyCode::Backspace {
                     text.pop();
+                } else if key.code == KeyCode::Return {
+                    irc.send_message(&text);
+                    text.clear();
                 } else {
                     let key_str = match key.code {
                         KeyCode::LShift
@@ -189,7 +214,8 @@ pub extern "C" fn _start() -> ! {
 
         let t = CMOS.with_mut(cmos::CMOS::get_time);
         draw_text(0, 0, format!("Time: {t:?}"), Color::WHITE);
-        draw_text(100, 100, &text, Color::GREEN);
+        draw_text(0, 32, &irc.text, Color::WHITE);
+        draw_text(8, 600 - 8, &text, Color::GREEN);
         draw_char(mouse_x as usize, mouse_y as usize, b'0', Color::ORANGE);
         swap_buffers();
 

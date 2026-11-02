@@ -5,7 +5,7 @@ use x86_64::{
     structures::paging::{OffsetPageTable, PageTable},
 };
 
-use crate::{bump_frame_allocator::BumpFrameAllocator, net::e1000_hal::MyHal, net_pci::map_e1000};
+use crate::{bump_frame_allocator::BumpFrameAllocator, net::e1000_hal::MyHal, net::pci::map_e1000};
 
 unsafe fn active_page_table(hhdm_offset: VirtAddr) -> &'static mut PageTable {
     let (l4_frame, _) = Cr3::read();
