@@ -11,5 +11,5 @@ qemu-system-x86_64 ^
     -boot d ^
     -vga std ^
     -serial stdio ^
-    -nic user,model=e1000
-
+    -netdev user,id=net0 ^
+    -device e1000,netdev=net0

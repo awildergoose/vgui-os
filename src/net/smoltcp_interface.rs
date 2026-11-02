@@ -1,7 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use log::trace;
 use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet},
     socket::{
@@ -16,7 +15,7 @@ use smoltcp::{
 
 use e1000_driver::e1000::{E1000Device, KernelFunc};
 
-use crate::net::smoltcp_device::E1000SmolDevice;
+use crate::{misc::get_instant_now, net::smoltcp_device::E1000SmolDevice};
 
 // Stuff from QEMU defaults (https://www.qemu.org/docs/master/system/devices/net.html#using-the-user-mode-network-stack)
 const MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
@@ -56,13 +55,12 @@ impl<'nic, H: KernelFunc> NetworkStack<'nic, H> {
     }
 
     pub fn poll(&mut self, now: Instant) {
-        let result = self.iface.poll(now, &mut self.device, &mut self.sockets);
-        trace!("smoltcp poll: {result:?}");
+        self.iface.poll(now, &mut self.device, &mut self.sockets);
     }
 
     // TODO
     pub const fn get_ephemeral_port(&self) -> u16 {
-        6942
+        49500
     }
 
     // DNS
@@ -87,15 +85,19 @@ impl<'nic, H: KernelFunc> NetworkStack<'nic, H> {
     where
         A: Into<IpEndpoint> + core::fmt::Debug,
     {
-        let rx = SocketBuffer::new(vec![0; 4096]);
-        let tx = SocketBuffer::new(vec![0; 4096]);
-        let mut socket = tcp::Socket::new(rx, tx);
+        let rx = SocketBuffer::new(vec![0; 1500]);
+        let tx = SocketBuffer::new(vec![0; 1500]);
+        let socket = tcp::Socket::new(rx, tx);
         let local_port = self.get_ephemeral_port();
+        let handle = self.sockets.add(socket);
+        let socket = self.sockets.get_mut::<tcp::Socket>(handle);
 
         socket
             .connect(self.iface.context(), address, local_port)
             .expect("failed to connect");
-        self.sockets.add(socket)
+
+        self.poll(get_instant_now());
+        handle
     }
 
     pub fn tcp_disconnect(&mut self, handle: SocketHandle) {

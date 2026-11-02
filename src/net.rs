@@ -23,7 +23,9 @@ pub fn init_network(hhdm_offset: u64, frame_allocator: &mut BumpFrameAllocator) 
     msdelay(500);
 
     let mut stack = NetworkStack::new(e1000_device, get_instant_now());
-    let query = stack.dns_query("tcpbin.com").expect("dns query failed");
+    let query = stack
+        .dns_query("irc.libera.chat")
+        .expect("dns query failed");
     let mut result = None;
 
     for _ in 0..10 {
@@ -45,7 +47,7 @@ pub fn init_network(hhdm_offset: u64, frame_allocator: &mut BumpFrameAllocator) 
     if let Some(address) = result {
         msdelay(2000);
 
-        let handle = stack.tcp_connect(IpEndpoint::new(address, 4242));
+        let handle = stack.tcp_connect(IpEndpoint::new(address, 6667));
 
         while !stack.tcp_may_send(handle) {
             stack.poll(get_instant_now());

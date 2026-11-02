@@ -66,7 +66,8 @@ pub fn msdelay(t: u64) {
 }
 
 pub fn get_instant_now() -> Instant {
-    Instant::from_millis(CMOS.with_mut(super::cmos::CMOS::get_time).timestamp())
+    let seconds = CMOS.with_mut(super::cmos::CMOS::get_time).timestamp();
+    Instant::from_millis(seconds * 1_000)
 }
 
 pub fn halt() -> ! {
