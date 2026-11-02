@@ -1,4 +1,4 @@
-use core::panic::PanicInfo;
+use core::{hint::spin_loop, panic::PanicInfo, time::Duration};
 
 use alloc::format;
 use limine::{
@@ -6,9 +6,11 @@ use limine::{
     request::{FramebufferRequest, HhdmRequest, MemmapRequest},
 };
 use linked_list_allocator::LockedHeap;
+use smoltcp::time::Instant;
 use x86_64::instructions::hlt;
 
 use crate::{
+    cmos::CMOS,
     color::Color,
     framebuffer::{clear_framebuffer, swap_buffers},
     serial_println,
@@ -49,6 +51,22 @@ pub unsafe fn init_allocator(virtual_start: *mut u8, heap_size: usize) {
     unsafe {
         ALLOCATOR.lock().init(virtual_start, heap_size);
     }
+}
+
+// if t < 1000 this will be imprecise
+pub fn msdelay(t: u64) {
+    CMOS.with_mut(|cmos| {
+        let start = cmos.get_time();
+        let end = start + Duration::from_millis(t);
+
+        while cmos.get_time() < end {
+            spin_loop();
+        }
+    });
+}
+
+pub fn get_instant_now() -> Instant {
+    Instant::from_millis(CMOS.with_mut(super::cmos::CMOS::get_time).timestamp())
 }
 
 pub fn halt() -> ! {
