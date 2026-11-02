@@ -13,10 +13,26 @@ pub fn draw_char(x: usize, y: usize, c: u8, color: Color) {
 /// Draws a single character onto a surface.
 pub fn draw_char_ex(surface: &mut Surface, x: usize, y: usize, c: u8, color: Color) {
     for (row, &bits) in FONT[c as usize].iter().take(8).enumerate() {
+        let Some(py) = y.checked_add(row) else {
+            continue;
+        };
+        if py >= surface.height {
+            continue;
+        }
+
         for col in 0..8 {
-            if bits & (1 << (7 - col)) != 0 {
-                surface.set_pixel(x + col, y + row, color);
+            if bits & (1 << (7 - col)) == 0 {
+                continue;
             }
+
+            let Some(px) = x.checked_add(col) else {
+                continue;
+            };
+            if px >= surface.width {
+                continue;
+            }
+
+            surface.set_pixel(px, py, color);
         }
     }
 }

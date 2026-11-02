@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
-use spin::{LazyLock, Mutex};
+use spin::LazyLock;
 use x86_64::instructions::port::{PortReadOnly, PortWriteOnly};
+
+use crate::wrapped_sync_cell::WrappedSyncCell;
 
 pub struct CMOS {
     read_port: PortReadOnly<u8>,
@@ -69,4 +71,5 @@ impl Default for CMOS {
     }
 }
 
-pub static CMOS: LazyLock<Mutex<CMOS>> = LazyLock::new(|| Mutex::new(CMOS::default()));
+pub static CMOS: LazyLock<WrappedSyncCell<CMOS>> =
+    LazyLock::new(|| WrappedSyncCell::new(CMOS::default()));

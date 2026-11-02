@@ -4,7 +4,7 @@ setlocal
 set ISO=build\iso
 
 @REM build
-cargo build
+cargo build --release
 
 @REM copy
 if NOT EXIST build (
@@ -18,7 +18,7 @@ if NOT EXIST build (
     copy /y "limine\limine-bios.sys"    "%ISO%\"          >nul
 )
 
-copy /y "target\x86_64-unknown-none\debug\vgui" "%ISO%\boot\vgui"   >nul
+copy /y "target\x86_64-unknown-none\release\vgui" "%ISO%\boot\vgui"   >nul
 copy /y "limine.conf"                             "%ISO%\limine.conf" >nul
 
 @REM iso

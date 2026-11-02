@@ -6,11 +6,10 @@
 //! ```
 use core::alloc::Layout;
 
-use alloc::{boxed::Box, vec};
 use limine::framebuffer::Framebuffer;
 use spin::{Mutex, MutexGuard};
 
-use crate::{color::Color, serial_println};
+use crate::color::Color;
 
 /// The global framebuffer surface. (backbuffer)
 pub static FRAMEBUFFER_SURFACE: Mutex<Option<Surface>> = Mutex::new(None);
@@ -81,18 +80,26 @@ pub fn init_fb(fb: &Framebuffer) {
     });
 
     // backbuffer
-    serial_println!("init backbuffer");
     let mut bguard = FRAMEBUFFER_SURFACE.lock();
-    serial_println!("locked backbuffer");
     *bguard = Some(Surface::new_empty(width, height));
-    serial_println!("created backbuffer");
 }
 
 pub fn swap_buffers() {
-    core::mem::swap(
-        &mut FRAMEBUFFER_SURFACE.lock().as_mut().unwrap().rgba,
-        &mut REAL_FRAMEBUFFER_SURFACE.lock().as_mut().unwrap().rgba,
-    );
+    unsafe {
+        let mut bb = FRAMEBUFFER_SURFACE.lock();
+        let back = bb.as_mut().unwrap();
+
+        core::ptr::copy_nonoverlapping(
+            back.rgba.cast::<u8>(),
+            REAL_FRAMEBUFFER_SURFACE
+                .lock()
+                .as_mut()
+                .unwrap()
+                .rgba
+                .cast::<u8>(),
+            back.width * back.height * 4,
+        );
+    }
 }
 
 /// Returns an index from a position, using the global framebuffer surface's size, and `None` if out of bounds.
@@ -173,15 +180,8 @@ impl Surface {
     #[must_use]
     pub fn new_empty(width: usize, height: usize) -> Self {
         let pixel_count = width * height;
-        serial_println!("initing buffer");
-        // TODO: this crashes with rgba being a ptr to null?
-        let rgba = unsafe {
-            alloc::alloc::alloc_zeroed(
-                Layout::from_size_align(pixel_count, 4).expect("layout creation died"),
-            )
-            .cast::<[u8; 4]>()
-        };
-        serial_println!("rgba box: {:?}", rgba.as_mut_ptr());
+        let layout = Layout::array::<[u8; 4]>(pixel_count).expect("framebuffer layout overflow");
+        let rgba = unsafe { alloc::alloc::alloc_zeroed(layout).cast::<[u8; 4]>() };
 
         Self {
             rgba,

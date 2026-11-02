@@ -1,4 +1,3 @@
-#![feature(array_ptr_get)]
 #![feature(core_float_math)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
@@ -61,10 +60,18 @@ pub extern "C" fn _start() -> ! {
     let usable_entry = mmap_response
         .entries()
         .iter()
-        .find(|entry| entry.type_ == MEMMAP_USABLE)
-        .expect("no usable memory region found for heap");
+        .filter(|entry| entry.type_ == MEMMAP_USABLE)
+        .max_by_key(|e| e.length);
+    let usable_entry = usable_entry.expect("no usable memory region found for heap");
 
-    serial_println!("MMAP OK");
+    serial_println!(
+        "MMAP OK ({} usable entries)",
+        mmap_response
+            .entries()
+            .iter()
+            .filter(|entry| entry.type_ == MEMMAP_USABLE)
+            .count(),
+    );
 
     let physical_start = usable_entry.base;
     let heap_size = usable_entry.length as usize;
@@ -103,17 +110,18 @@ pub extern "C" fn _start() -> ! {
     init_mouse().expect("failed to init mouse");
     serial_println!("MOUSE OK");
 
-    serial_println!("CMOS: {:?}", CMOS.lock().get_time());
+    serial_println!("CMOS: {:?}", CMOS.with_mut(cmos::CMOS::get_time));
 
     // init_network().expect("failed to init network");
     // serial_println!("NET OK");
 
-    let mut mouse_x = 0;
-    let mut mouse_y = 0;
+    let mut mouse_x = 0u16;
+    let mut mouse_y = 0u16;
+    let mut mouse_l = false;
     let mut text = String::new();
 
     loop {
-        clear_framebuffer(Color::GRAY);
+        clear_framebuffer(if mouse_l { Color::BLACK } else { Color::GRAY });
 
         if let Some(key) = KEYBOARD.lock().poll() {
             serial_println!("key: {key:?}");
@@ -126,7 +134,8 @@ pub extern "C" fn _start() -> ! {
                         KeyCode::LShift
                         | KeyCode::RShift
                         | KeyCode::RControl
-                        | KeyCode::LControl => "",
+                        | KeyCode::LControl
+                        | KeyCode::LAlt => "",
                         KeyCode::OemComma => ",",
                         KeyCode::Spacebar => " ",
                         _ => &format!("{:?}", key.code),
@@ -144,20 +153,13 @@ pub extern "C" fn _start() -> ! {
         if let Some(res) = poll_mouse() {
             serial_println!("mouse: {res:?}");
 
-            mouse_x += res.dx;
-            mouse_y += res.dy;
-
-            if res.flags.contains(MouseFlags::LEFT) {
-                clear_framebuffer(Color::BLACK);
-            }
+            mouse_x += res.dx.max(0).min(fb.width as i16) as u16;
+            mouse_y += res.dy.max(0).min(fb.height as i16) as u16;
+            mouse_l = res.flags.contains(MouseFlags::LEFT);
         }
 
-        draw_text(
-            0,
-            0,
-            format!("Time: {:?}", CMOS.lock().get_time()),
-            Color::WHITE,
-        );
+        let t = CMOS.with_mut(cmos::CMOS::get_time);
+        draw_text(0, 0, format!("Time: {t:?}"), Color::WHITE);
         draw_text(100, 100, &text, Color::GREEN);
         draw_char(mouse_x as usize, mouse_y as usize, b'0', Color::ORANGE);
         swap_buffers();
