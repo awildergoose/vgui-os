@@ -1,11 +1,17 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use log::trace;
 use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet},
-    socket::dns,
+    socket::{
+        dns,
+        tcp::{self, SocketBuffer},
+    },
     time::Instant,
-    wire::{DnsQueryType, EthernetAddress, HardwareAddress, IpAddress, IpCidr, Ipv4Address},
+    wire::{
+        DnsQueryType, EthernetAddress, HardwareAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address,
+    },
 };
 
 use e1000_driver::e1000::{E1000Device, KernelFunc};
@@ -50,18 +56,20 @@ impl<'nic, H: KernelFunc> NetworkStack<'nic, H> {
     }
 
     pub fn poll(&mut self, now: Instant) {
-        self.iface.poll(now, &mut self.device, &mut self.sockets);
+        let result = self.iface.poll(now, &mut self.device, &mut self.sockets);
+        trace!("smoltcp poll: {result:?}");
     }
 
-    pub fn dns_query(&mut self, hostname: &str) -> Result<dns::QueryHandle, dns::StartQueryError> {
-        let iface = &mut self.iface;
-        let sockets = &mut self.sockets;
+    // TODO
+    pub const fn get_ephemeral_port(&self) -> u16 {
+        6942
+    }
 
-        sockets.get_mut::<dns::Socket>(self.dns_handle).start_query(
-            iface.context(),
-            hostname,
-            DnsQueryType::A,
-        )
+    // DNS
+    pub fn dns_query(&mut self, hostname: &str) -> Result<dns::QueryHandle, dns::StartQueryError> {
+        self.sockets
+            .get_mut::<dns::Socket>(self.dns_handle)
+            .start_query(self.iface.context(), hostname, DnsQueryType::A)
     }
 
     pub fn dns_result(
@@ -72,5 +80,48 @@ impl<'nic, H: KernelFunc> NetworkStack<'nic, H> {
             .get_mut::<dns::Socket>(self.dns_handle)
             .get_query_result(query)
             .map(|addresses| addresses.into_iter().collect())
+    }
+
+    // TCP
+    pub fn tcp_connect<A>(&mut self, address: A) -> SocketHandle
+    where
+        A: Into<IpEndpoint> + core::fmt::Debug,
+    {
+        let rx = SocketBuffer::new(vec![0; 4096]);
+        let tx = SocketBuffer::new(vec![0; 4096]);
+        let mut socket = tcp::Socket::new(rx, tx);
+        let local_port = self.get_ephemeral_port();
+
+        socket
+            .connect(self.iface.context(), address, local_port)
+            .expect("failed to connect");
+        self.sockets.add(socket)
+    }
+
+    pub fn tcp_disconnect(&mut self, handle: SocketHandle) {
+        self.sockets.get_mut::<tcp::Socket>(handle).abort();
+    }
+
+    pub fn tcp_state(&self, handle: SocketHandle) -> tcp::State {
+        self.sockets.get::<tcp::Socket>(handle).state()
+    }
+
+    pub fn tcp_may_send(&self, handle: SocketHandle) -> bool {
+        self.sockets.get::<tcp::Socket>(handle).may_send()
+    }
+
+    pub fn tcp_send(&mut self, handle: SocketHandle, data: &[u8]) {
+        self.sockets
+            .get_mut::<tcp::Socket>(handle)
+            .send_slice(data)
+            .unwrap();
+    }
+
+    pub fn tcp_recv(&mut self, handle: SocketHandle) -> Vec<u8> {
+        let socket = self.sockets.get_mut::<tcp::Socket>(handle);
+        let mut buf = vec![0; socket.recv_queue()];
+        let len = socket.recv_slice(&mut buf).unwrap();
+        buf.resize(len, 0);
+        buf
     }
 }
