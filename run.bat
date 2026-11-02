@@ -10,4 +10,5 @@ qemu-system-x86_64 ^
     -cdrom "build\vgui.iso" ^
     -boot d ^
     -vga std ^
-    -serial stdio
+    -serial stdio ^
+    -net nic,model=virtio -net user

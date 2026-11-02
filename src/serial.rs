@@ -1,7 +1,9 @@
 use core::hint::spin_loop;
 
-use spin::{LazyLock, Mutex};
+use spin::LazyLock;
 use x86_64::instructions::port::Port;
+
+use crate::wrapped_sync_cell::WrappedSyncCell;
 
 pub struct SerialPort {
     data: Port<u8>,
@@ -70,14 +72,16 @@ impl core::fmt::Write for SerialPort {
     }
 }
 
-pub static SERIAL1: LazyLock<Mutex<SerialPort>> =
-    LazyLock::new(|| unsafe { Mutex::new(SerialPort::init(0x3F8)) });
+pub static SERIAL1: LazyLock<WrappedSyncCell<SerialPort>> =
+    LazyLock::new(|| unsafe { WrappedSyncCell::new(SerialPort::init(0x3F8)) });
 
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        $crate::serial::SERIAL1.lock().write_fmt(format_args!($($arg)*)).unwrap();
+        $crate::serial::SERIAL1.with_mut(|s| {
+            s.write_fmt(format_args!($($arg)*)).unwrap();
+        });
     }};
 }
 

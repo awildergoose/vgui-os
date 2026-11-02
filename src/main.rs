@@ -1,3 +1,4 @@
+#![feature(array_ptr_get)]
 #![feature(core_float_math)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
@@ -14,6 +15,8 @@ use limine::memmap::MEMMAP_USABLE;
 
 use pc_keyboard::{KeyCode, KeyState};
 
+use crate::cmos::CMOS;
+use crate::framebuffer::swap_buffers;
 use crate::misc::{
     BASE_REVISION, FRAMEBUFFER_REQUEST, HHDM_REQUEST, MEMORY_MAP_REQUEST, halt, init_allocator,
 };
@@ -28,6 +31,7 @@ use crate::{
 
 extern crate alloc;
 
+pub mod cmos;
 pub mod color;
 pub mod font;
 pub mod framebuffer;
@@ -35,9 +39,11 @@ pub mod idt;
 pub mod keyboard;
 pub mod misc;
 pub mod mouse;
+pub mod net;
 pub mod ps2;
 pub mod serial;
 pub mod text;
+pub mod wrapped_sync_cell;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
@@ -90,16 +96,25 @@ pub extern "C" fn _start() -> ! {
     serial_println!("FB OK");
 
     init_fb(fb);
+    serial_println!("FB INIT");
     clear_framebuffer(Color::GRAY);
+    serial_println!("FB CLEAR");
 
     init_mouse().expect("failed to init mouse");
     serial_println!("MOUSE OK");
+
+    serial_println!("CMOS: {:?}", CMOS.lock().get_time());
+
+    // init_network().expect("failed to init network");
+    // serial_println!("NET OK");
 
     let mut mouse_x = 0;
     let mut mouse_y = 0;
     let mut text = String::new();
 
     loop {
+        clear_framebuffer(Color::GRAY);
+
         if let Some(key) = KEYBOARD.lock().poll() {
             serial_println!("key: {key:?}");
 
@@ -119,8 +134,6 @@ pub extern "C" fn _start() -> ! {
 
                     text += key_str;
                 }
-
-                clear_framebuffer(Color::GRAY);
             }
 
             if key.code == KeyCode::Escape {
@@ -136,13 +149,18 @@ pub extern "C" fn _start() -> ! {
 
             if res.flags.contains(MouseFlags::LEFT) {
                 clear_framebuffer(Color::BLACK);
-            } else {
-                clear_framebuffer(Color::GRAY);
             }
         }
 
+        draw_text(
+            0,
+            0,
+            format!("Time: {:?}", CMOS.lock().get_time()),
+            Color::WHITE,
+        );
         draw_text(100, 100, &text, Color::GREEN);
         draw_char(mouse_x as usize, mouse_y as usize, b'0', Color::ORANGE);
+        swap_buffers();
 
         spin_loop();
     }

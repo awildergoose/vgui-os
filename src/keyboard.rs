@@ -29,4 +29,4 @@ impl Default for Keyboard {
     }
 }
 
-pub static KEYBOARD: LazyLock<Mutex<Keyboard>> = LazyLock::new(|| Mutex::new(Keyboard::new()));
+pub static KEYBOARD: LazyLock<Mutex<Keyboard>> = LazyLock::new(|| Mutex::new(Keyboard::default()));
