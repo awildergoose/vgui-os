@@ -153,8 +153,10 @@ pub extern "C" fn _start() -> ! {
         if let Some(res) = poll_mouse() {
             serial_println!("mouse: {res:?}");
 
-            mouse_x += res.dx.max(0).min(fb.width as i16) as u16;
-            mouse_y += res.dy.max(0).min(fb.height as i16) as u16;
+            mouse_x = (mouse_x.cast_signed() + res.dx).max(0).min(fb.width as i16) as u16;
+            mouse_y = (mouse_y.cast_signed() + res.dy)
+                .max(0)
+                .min(fb.height as i16) as u16;
             mouse_l = res.flags.contains(MouseFlags::LEFT);
         }
 
