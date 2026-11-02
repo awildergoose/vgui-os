@@ -77,12 +77,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413d67b29ef1021b4d60f4aa1e925ca031751e213832b4b1d588fae623c05c60"
 
 [[package]]
-name = "core_detect"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
-
-[[package]]
 name = "defmt"
 version = "0.3.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -123,6 +117,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "e1000-driver"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "volatile 0.3.0",
+]
+
+[[package]]
 name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -139,19 +141,6 @@ checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
  "hash32",
  "stable_deref_trait",
-]
-
-[[package]]
-name = "ixgbe-driver"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82fa50aa357d319c805280265b0fc279ac3ce19923a1767c8bfd9fe9d3185ada"
-dependencies = [
- "bit_field",
- "core_detect",
- "log",
- "smoltcp",
- "volatile 0.3.0",
 ]
 
 [[package]]
@@ -326,9 +315,10 @@ dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
  "chrono",
- "ixgbe-driver",
+ "e1000-driver",
  "limine",
  "linked_list_allocator",
+ "log",
  "pc-keyboard",
  "ps2",
  "smoltcp",

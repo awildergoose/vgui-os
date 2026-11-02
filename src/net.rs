@@ -1,76 +1,130 @@
-use core::{hint::spin_loop, ptr::NonNull, time::Duration};
+use core::{alloc::Layout, hint::spin_loop, time::Duration};
 
-use alloc::vec;
-use ixgbe_driver::{IxgbeDevice, IxgbeHal, IxgbeNetBuf, MemPool, NicDevice};
+use e1000_driver::pci::E1000_REGS;
+use log::{debug, trace};
 
-use crate::serial_println;
+use alloc::boxed::Box;
+
+use crate::{cmos::CMOS, net_pci::pci_init, serial_print};
 
 struct MyHal;
 
-unsafe impl IxgbeHal for MyHal {
-    fn dma_alloc(size: usize) -> (usize, NonNull<u8>) {
-        serial_println!("dma_alloc {size}");
-        let layout = alloc::alloc::Layout::from_size_align(size, 4096).expect("Invalid layout");
-        let ptr = unsafe { alloc::alloc::alloc(layout) };
+impl e1000_driver::e1000::KernelFunc for MyHal {
+    const PAGE_SIZE: usize = 1 << 12;
 
-        let phys_addr = ptr as usize;
-        serial_println!("Are we ok?");
-        (phys_addr, NonNull::new(ptr).unwrap())
+    fn dma_alloc_coherent(&mut self, pages: usize) -> (usize, usize) {
+        #[allow(clippy::cast_ptr_alignment)]
+        let paddr: Box<[u32]> = {
+            let bytes = Self::PAGE_SIZE * pages;
+
+            let ptr = unsafe {
+                alloc::alloc::alloc_zeroed(
+                    Layout::from_size_align(bytes, Self::PAGE_SIZE).expect("hal layout failed"),
+                )
+            };
+
+            if ptr.is_null() {
+                alloc::alloc::handle_alloc_error(
+                    Layout::from_size_align(bytes, Self::PAGE_SIZE).unwrap(),
+                );
+            }
+
+            unsafe {
+                Box::from_raw(core::ptr::slice_from_raw_parts_mut(
+                    ptr.cast::<u32>(),
+                    bytes,
+                ))
+            }
+        };
+
+        let len = paddr.len();
+
+        let paddr = Box::into_raw(paddr) as *const u32 as usize;
+        let vaddr = paddr;
+        trace!("alloc paddr: {paddr:#x}, len={len}");
+
+        (vaddr, paddr)
     }
 
-    unsafe fn dma_dealloc(_paddr: usize, vaddr: NonNull<u8>, size: usize) -> i32 {
-        let layout = alloc::alloc::Layout::from_size_align(size, 4096).expect("Invalid layout");
-        serial_println!("dealloc {vaddr:?}!");
-        unsafe { alloc::alloc::dealloc(vaddr.as_ptr(), layout) };
-        serial_println!("done dealloc!");
-        0 // Success
-    }
-
-    unsafe fn mmio_phys_to_virt(paddr: usize, _size: usize) -> NonNull<u8> {
-        // Simple identity mapping for testing
-        serial_println!("map bs: {paddr}");
-        NonNull::new(paddr as *mut u8).unwrap()
-    }
-
-    unsafe fn mmio_virt_to_phys(vaddr: NonNull<u8>, _size: usize) -> usize {
-        // Simple identity mapping for testing
-        serial_println!("map bs2: {vaddr:?}");
-        vaddr.as_ptr() as usize
-    }
-
-    fn wait_until(duration: Duration) -> Result<(), &'static str> {
-        // TODO: RTC implementation
-        // serial_println!("wait {duration:?}");
-        for _ in 0..duration.as_millis() * 1000 {
-            spin_loop();
-        }
-        Ok(())
+    fn dma_free_coherent(&mut self, _vaddr: usize, _pages: usize) {
+        // todo!()
+        trace!("todo: free");
     }
 }
 
-pub fn init_network() -> ixgbe_driver::IxgbeResult {
-    let buffer = vec![0u8; 16384].into_boxed_slice();
+fn msdelay(t: u64) {
+    CMOS.with_mut(|cmos| {
+        let start = cmos.get_time();
+        let end = start + Duration::from_millis(t);
 
-    let pool = MemPool::allocate::<MyHal>(1, 16384)?;
-    serial_println!("pool init!");
-    let mut device =
-        IxgbeDevice::<MyHal, 512>::init(buffer.as_ptr().addr(), buffer.len(), 1, 1, &pool)?;
+        while cmos.get_time() < end {
+            spin_loop();
+        }
+    });
+}
 
-    serial_println!("device init!");
+pub fn init_network() {
+    pci_init();
+    trace!("PCI OK");
 
-    // make a packet
-    let packet: &[u8] = &[];
-    let packet_size = size_of_val(packet);
-    let queue_id = 0;
-    let num_packets = 1;
+    let mut e1000_device =
+        e1000_driver::e1000::E1000Device::<MyHal>::new(MyHal, E1000_REGS.try_into().unwrap())
+            .unwrap();
 
-    // send a packet
-    let tx_buf = IxgbeNetBuf::alloc(&pool, packet_size)?;
-    serial_println!("tx buf allocated");
-    device.send(queue_id, tx_buf)?;
-    device.receive_packets(queue_id, num_packets, |rx_buf| {
-        serial_println!("net rx: {:?}", rx_buf.packet());
-    })?;
+    trace!("device made!");
 
-    Ok(())
+    // MAC 52:54:00:12:34:56
+    let ping_frame: Box<[u8]> = Box::new([
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
+        0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x0a, 0x00,
+        0x02, 0x0f, //10.0.2.15
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x02, 0x02,
+    ]); //ping 10.0.2.2
+
+    msdelay(500);
+    e1000_device.e1000_transmit(&ping_frame);
+    e1000_device.e1000_transmit(&ping_frame);
+    e1000_device.e1000_transmit(&ping_frame);
+    e1000_device.e1000_transmit(&ping_frame);
+
+    let mut c = 12;
+    loop {
+        let rx_buf = e1000_device.e1000_recv();
+        if let Some(vecdeque) = rx_buf {
+            debug!("e1000 recv num {}", vecdeque.len());
+            for v in &vecdeque {
+                print_hex_dump(v, v.len());
+            }
+        }
+        c -= 1;
+        if c <= 0 {
+            break;
+        }
+        msdelay(100);
+    }
+}
+
+pub fn print_hex_dump(buf: &[u8], len: usize) {
+    //let mut linebuf: [char; 16] = [0 as char; 16];
+
+    use alloc::string::String;
+    let mut linebuf = String::with_capacity(32);
+    let buf_len = buf.len();
+
+    for (i, item) in buf.iter().enumerate().take(len) {
+        if (i % 16) == 0 {
+            serial_print!("\t{:?}\nHEX DUMP: ", linebuf);
+            //linebuf.fill(0 as char);
+            linebuf.clear();
+        }
+
+        if i >= buf_len {
+            serial_print!(" {:02x}", 0);
+        } else {
+            serial_print!(" {:02x}", item);
+            //linebuf[i%16] = buf[i] as char;
+            linebuf.push(*item as char);
+        }
+    }
+    serial_print!("\t{:?}\n", linebuf);
 }

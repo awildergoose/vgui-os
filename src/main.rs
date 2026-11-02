@@ -1,9 +1,11 @@
+#![feature(abi_x86_interrupt)]
 #![feature(core_float_math)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
+#![allow(clippy::cast_precision_loss)]
 #![no_std]
 #![no_main]
 
@@ -11,14 +13,17 @@ use alloc::format;
 use alloc::string::String;
 use core::hint::spin_loop;
 use limine::memmap::MEMMAP_USABLE;
+use log::{info, trace};
 
 use pc_keyboard::{KeyCode, KeyState};
 
 use crate::cmos::CMOS;
 use crate::framebuffer::swap_buffers;
+use crate::logger::SERIAL_LOGGER;
 use crate::misc::{
     BASE_REVISION, FRAMEBUFFER_REQUEST, HHDM_REQUEST, MEMORY_MAP_REQUEST, halt, init_allocator,
 };
+use crate::net::init_network;
 use crate::{
     color::Color,
     framebuffer::{clear_framebuffer, init_fb},
@@ -36,9 +41,11 @@ pub mod font;
 pub mod framebuffer;
 pub mod idt;
 pub mod keyboard;
+pub mod logger;
 pub mod misc;
 pub mod mouse;
 pub mod net;
+pub mod net_pci;
 pub mod ps2;
 pub mod serial;
 pub mod text;
@@ -84,8 +91,12 @@ pub extern "C" fn _start() -> ! {
     unsafe { init_allocator(virtual_start, heap_size) };
     serial_println!("ALLOCATOR OK");
 
+    log::set_logger(&SERIAL_LOGGER).expect("setting logger");
+    log::set_max_level(log::LevelFilter::Trace);
+    info!("LOGGER OK");
+
     init_idt();
-    serial_println!("IDT OK");
+    info!("IDT OK");
 
     let response = FRAMEBUFFER_REQUEST
         .response()
@@ -100,20 +111,20 @@ pub extern "C" fn _start() -> ! {
         fb.memory_model
     );
 
-    serial_println!("FB OK");
+    info!("FB OK");
 
     init_fb(fb);
-    serial_println!("FB INIT");
+    info!("FB INIT");
     clear_framebuffer(Color::GRAY);
-    serial_println!("FB CLEAR");
+    info!("FB CLEAR");
 
     init_mouse().expect("failed to init mouse");
-    serial_println!("MOUSE OK");
+    info!("MOUSE OK");
 
-    serial_println!("CMOS: {:?}", CMOS.with_mut(cmos::CMOS::get_time));
+    info!("CMOS: {:?}", CMOS.with_mut(cmos::CMOS::get_time));
 
-    // init_network().expect("failed to init network");
-    // serial_println!("NET OK");
+    init_network();
+    info!("NET OK");
 
     let mut mouse_x = 0u16;
     let mut mouse_y = 0u16;
@@ -124,7 +135,7 @@ pub extern "C" fn _start() -> ! {
         clear_framebuffer(if mouse_l { Color::BLACK } else { Color::GRAY });
 
         if let Some(key) = KEYBOARD.lock().poll() {
-            serial_println!("key: {key:?}");
+            trace!("key: {key:?}");
 
             if key.state == KeyState::Down {
                 if key.code == KeyCode::Backspace {
@@ -151,7 +162,7 @@ pub extern "C" fn _start() -> ! {
         }
 
         if let Some(res) = poll_mouse() {
-            serial_println!("mouse: {res:?}");
+            trace!("mouse: {res:?}");
 
             mouse_x = (mouse_x.cast_signed() + res.dx).max(0).min(fb.width as i16) as u16;
             mouse_y = (mouse_y.cast_signed() + res.dy)

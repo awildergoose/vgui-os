@@ -1,5 +1,6 @@
 use core::panic::PanicInfo;
 
+use alloc::format;
 use limine::{
     BaseRevision, RequestsEndMarker, RequestsStartMarker,
     request::{FramebufferRequest, HhdmRequest, MemmapRequest},
@@ -7,7 +8,15 @@ use limine::{
 use linked_list_allocator::LockedHeap;
 use x86_64::instructions::hlt;
 
-use crate::serial_println;
+use crate::{
+    color::Color,
+    framebuffer::{clear_framebuffer, swap_buffers},
+    serial_println,
+    text::{
+        draw_text, draw_text_formatted, get_formatted_text_height, get_formatted_text_width,
+        get_text_width,
+    },
+};
 
 #[used]
 #[unsafe(link_section = ".requests_start_marker")]
@@ -50,6 +59,38 @@ pub fn halt() -> ! {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    serial_println!("PANIC: {info:#?}");
-    halt()
+    fatal_fail(&format!("PANIC: {info:#?}"));
+}
+
+pub fn fatal_fail(big_text: &str) -> ! {
+    // Gotta make it die in style B)
+    serial_println!();
+    serial_println!("{big_text}");
+
+    clear_framebuffer(Color::BLUE);
+
+    let base_y = 125;
+    let ttext = "FUCK FUCK FUCK FUCK FUCK FUCK FUCK FUCK FUCK FUCK";
+    let tmeasured = get_text_width(ttext);
+    let tx = (800 - tmeasured) / 2;
+
+    for y in 0..4 {
+        draw_text(tx, base_y + (8 * y), ttext, Color::WHITE);
+    }
+
+    let measured = get_formatted_text_width(big_text);
+    draw_text_formatted((800 - measured) / 2, base_y + 40, big_text, Color::WHITE);
+
+    let measured_y = get_formatted_text_height(big_text);
+    for y in 0..4 {
+        draw_text(
+            tx,
+            measured_y + base_y + 40 + (8 * y) + 16,
+            ttext,
+            Color::WHITE,
+        );
+    }
+
+    swap_buffers();
+    halt();
 }

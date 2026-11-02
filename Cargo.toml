@@ -12,12 +12,21 @@ spin = "0.12.3"
 x86_64 = "0.15.5"
 bitflags = { version = "2.13.2", features = ["bytemuck"] }
 bytemuck = { version = "1.25.2", features = ["derive"] }
-ixgbe-driver = "0.1.1"
-smoltcp = { version = "0.12.0", default-features = false, features = ["alloc", "socket-tcp"] }
+smoltcp = { version = "0.12.0", default-features = false, features = [
+    "alloc",
+    "log",
+    "medium-ethernet",
+    "medium-ip",
+    "proto-ipv4",
+    "socket-tcp",
+] }
 chrono = { version = "0.4.45", default-features = false, features = ["alloc"] }
+log = "0.4.35"
+e1000-driver = "0.1.0"
 
 [patch.crates-io]
 ps2 = { path = "vendor/ps2" }
+e1000-driver = { path = "vendor/e1000-driver" }
 
 [profile.dev]
 panic = "abort"

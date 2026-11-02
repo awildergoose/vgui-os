@@ -11,4 +11,5 @@ qemu-system-x86_64 ^
     -boot d ^
     -vga std ^
     -serial stdio ^
-    -net nic,model=virtio -net user
+    -nic user,model=e1000
+
