@@ -17,6 +17,7 @@ use log::{info, trace};
 
 use pc_keyboard::{KeyCode, KeyState};
 
+use crate::bump_frame_allocator::BumpFrameAllocator;
 use crate::cmos::CMOS;
 use crate::framebuffer::swap_buffers;
 use crate::logger::SERIAL_LOGGER;
@@ -35,6 +36,7 @@ use crate::{
 
 extern crate alloc;
 
+pub mod bump_frame_allocator;
 pub mod cmos;
 pub mod color;
 pub mod font;
@@ -52,6 +54,7 @@ pub mod text;
 pub mod wrapped_sync_cell;
 
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_lines)]
 pub extern "C" fn _start() -> ! {
     assert!(
         BASE_REVISION.is_supported(),
@@ -64,12 +67,18 @@ pub extern "C" fn _start() -> ! {
     serial_println!("HHDM OK");
 
     let mmap_response = MEMORY_MAP_REQUEST.response().expect("MMAP unavailable");
-    let usable_entry = mmap_response
+    let heap_entry = mmap_response
         .entries()
         .iter()
         .filter(|entry| entry.type_ == MEMMAP_USABLE)
-        .max_by_key(|e| e.length);
-    let usable_entry = usable_entry.expect("no usable memory region found for heap");
+        .max_by_key(|e| e.length)
+        .expect("no usable memory region found for heap");
+    let frame_entry = mmap_response
+        .entries()
+        .iter()
+        .filter(|entry| entry.base != heap_entry.base && entry.type_ == MEMMAP_USABLE)
+        .max_by_key(|entry| entry.length)
+        .expect("no usable memory region found for frame allocator");
 
     serial_println!(
         "MMAP OK ({} usable entries)",
@@ -80,8 +89,8 @@ pub extern "C" fn _start() -> ! {
             .count(),
     );
 
-    let physical_start = usable_entry.base;
-    let heap_size = usable_entry.length as usize;
+    let physical_start = heap_entry.base;
+    let heap_size = heap_entry.length as usize;
 
     let virtual_start = (physical_start + hhdm_offset) as *mut u8;
 
@@ -90,6 +99,13 @@ pub extern "C" fn _start() -> ! {
 
     unsafe { init_allocator(virtual_start, heap_size) };
     serial_println!("ALLOCATOR OK");
+
+    serial_println!("FRAME ALLOCATOR BASE: {}", frame_entry.base);
+    serial_println!("FRAME ALLOCATOR SIZE: {}", frame_entry.length);
+
+    let mut frame_allocator = BumpFrameAllocator::new(frame_entry.base, frame_entry.length);
+
+    serial_println!("FRAME ALLOCATOR OK");
 
     log::set_logger(&SERIAL_LOGGER).expect("setting logger");
     log::set_max_level(log::LevelFilter::Trace);
@@ -123,7 +139,7 @@ pub extern "C" fn _start() -> ! {
 
     info!("CMOS: {:?}", CMOS.with_mut(cmos::CMOS::get_time));
 
-    init_network();
+    init_network(hhdm_offset, &mut frame_allocator);
     info!("NET OK");
 
     let mut mouse_x = 0u16;

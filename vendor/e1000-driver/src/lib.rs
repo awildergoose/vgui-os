@@ -1,0 +1,14 @@
+#![no_std]
+#![allow(unused)]
+
+extern crate alloc;
+
+#[macro_use]
+extern crate log;
+
+mod utils;
+pub mod e1000;
+
+pub use volatile::Volatile;
+
+pub trait Ext {}

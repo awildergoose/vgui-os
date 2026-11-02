@@ -1,6 +1,12 @@
 use log::{error, info};
 
-use x86_64::instructions::port::{Port, PortWriteOnly};
+use x86_64::{
+    PhysAddr, VirtAddr,
+    instructions::port::{Port, PortWriteOnly},
+    structures::paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
+};
+
+use crate::bump_frame_allocator::BumpFrameAllocator;
 
 struct Pci {
     address_port: PortWriteOnly<u32>,
@@ -44,6 +50,40 @@ impl Pci {
     }
 }
 
+// in QEMU, the physical address of E1000 seems to always be this ^-^
+const E1000_PHYS: u64 = 0xFEBC_0000;
+const E1000_SIZE: u64 = 0x2_0000;
+
+pub fn map_e1000<M>(
+    mapper: &mut M,
+    frame_allocator: &mut BumpFrameAllocator,
+    hhdm_offset: u64,
+) -> u64
+where
+    M: Mapper<Size4KiB>,
+{
+    let virt_base = hhdm_offset + E1000_PHYS;
+
+    let flags = PageTableFlags::PRESENT
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::NO_CACHE
+        | PageTableFlags::WRITE_THROUGH;
+
+    for offset in (0..E1000_SIZE).step_by(4096) {
+        let page = Page::containing_address(VirtAddr::new(virt_base + offset));
+        let frame = PhysFrame::containing_address(PhysAddr::new(E1000_PHYS + offset));
+
+        unsafe {
+            mapper
+                .map_to(page, frame, flags, frame_allocator)
+                .expect("failed to map E1000 MMIO")
+                .flush();
+        }
+    }
+
+    virt_base
+}
+
 pub fn pci_init() {
     let mut pci = Pci::new(0xCF8, 0xCFC);
     let mut e1000 = None;
@@ -68,10 +108,9 @@ pub fn pci_init() {
     if let Some(e1000) = e1000 {
         info!("e1000 device: {e1000:?}");
 
-        let bar0 = pci.read_u32(0, e1000, 0, 0x10);
-        let e1000_phys = u64::from(bar0 & !0xF);
-
-        info!("physical BAR0 addr: {e1000_phys:X}");
+        let command = pci.read_u32(0, e1000, 0, 0x04) as u16;
+        let command = command | (1 << 1) | (1 << 2);
+        pci.write_u32(0, e1000, 0, 0x04, u32::from(command));
     } else {
         error!("failed to find e1000");
     }
